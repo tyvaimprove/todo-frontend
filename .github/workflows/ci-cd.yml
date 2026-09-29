@@ -1,0 +1,90 @@
+name: To-Do Frontend CI/CD
+
+on:
+  push:
+    branches:
+      - stage
+      - main
+
+env:
+  IMAGE_NAME: "todo-frontend"
+  KEEP_IMAGES: "2"
+
+jobs:
+  # ==================== СТАДИЯ BUILD ====================
+  build-job:
+    runs-on: [self-hosted, testserver]
+    if: github.ref_name == 'stage'
+
+    steps:
+      - name: Checkout repository code
+        uses: actions/checkout@v4
+
+      - name: Build Docker Image
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "Сборка Docker-образа ${{ env.IMAGE_NAME }}:${SHORT_SHA}"
+          docker build -t ${{ env.IMAGE_NAME }}:${SHORT_SHA} .
+
+  # ==================== СТАДИЯ DEPLOY ====================
+  deploy-job:
+    runs-on: [self-hosted, testserver]
+    needs: build-job
+    if: always() && (needs.build-job.result == 'success' || github.ref_name == 'main')
+
+    steps:
+      - name: Deploy Stack to Server
+        env:
+          ALL_SECRETS: ${{ toJson(secrets) }}
+          ALL_VARS: ${{ toJson(vars) }}
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            ENV_SUFFIX="prod"
+            export FRONT_PORT="3000" # Порт для Production фронтенда
+          else
+            ENV_SUFFIX="test"
+            export FRONT_PORT="3001" # Порт для Staging фронтенда
+          fi
+
+          ENV_PROJECT_NAME="${{ github.event.repository.name }}-${ENV_SUFFIX}"
+          ENV_STACK_DIR="/opt/docker-apps/${ENV_PROJECT_NAME}"
+
+          mkdir -p ${ENV_STACK_DIR}
+          cp docker-compose.yml ${ENV_STACK_DIR}/docker-compose.yml
+          cp nginx.conf ${ENV_STACK_DIR}/nginx.conf
+
+          cd ${ENV_STACK_DIR}
+          truncate -s 0 .env
+
+          echo "CI_COMMIT_SHORT_SHA=${SHORT_SHA}" >> .env
+          echo "COMPOSE_PROJECT_NAME=${ENV_PROJECT_NAME}" >> .env
+          echo "FRONT_PORT=${FRONT_PORT}" >> .env
+
+          # Прокидываем во фронтенд базовый URL бэкенда из переменных GitHub
+          # Для Vite все переменные окружения должны начинаться с VITE_
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo "VITE_API_URL=http://your-domain.com:8000" >> .env
+          else
+            echo "VITE_API_URL=http://your-domain.com:8001" >> .env
+          fi
+
+          docker compose up -d --remove-orphans
+          docker compose ps
+
+  # ==================== СТАДИЯ CLEANUP ====================
+  cleanup-job:
+    runs-on: [self-hosted, testserver]
+    needs: deploy-job
+    if: always() && needs.deploy-job.result == 'success'
+
+    steps:
+      - name: Cleanup old Docker images
+        run: |
+          docker images ${{ env.IMAGE_NAME }} --format "{{.ID}} {{.CreatedAt}}" | \
+            sort -r -k2 | \
+            tail -n +$((${{ env.KEEP_IMAGES }} + 1)) | \
+            awk '{print $1}' | \
+            xargs -r docker rmi -f 2>/dev/null || true
+          docker image prune -f
