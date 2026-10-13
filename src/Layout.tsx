@@ -4,9 +4,7 @@ export default function Layout() {
   return (
     <div>
       <nav className="navbar">
-        <NavLink to="/" end>Home</NavLink>
-        <NavLink to="/about">About</NavLink>
-        <NavLink to="/users">Users</NavLink>
+        <NavLink to="/" end>Todo</NavLink>
       </nav>
       <main>
         <Outlet />
