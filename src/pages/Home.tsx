@@ -17,7 +17,7 @@ export default function Home() {
         <CustomButton
           onClick={ () => setCount(count - 1)}
         >
-          +Decrease
+          -decrease
         </CustomButton>
         <CustomButton
           onClick={ () => setCount(0)}
