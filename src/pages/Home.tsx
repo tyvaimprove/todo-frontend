@@ -15,6 +15,11 @@ export default function Home() {
           +increase
         </CustomButton>
         <CustomButton
+          onClick={ () => setCount(count - 1)}
+        >
+          +Decrease
+        </CustomButton>
+        <CustomButton
           onClick={ () => setCount(0)}
           variant='danger'
         >
